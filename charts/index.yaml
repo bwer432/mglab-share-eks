@@ -1,0 +1,25 @@
+apiVersion: v1
+entries:
+  fozzy:
+  - apiVersion: v2
+    appVersion: 1.16.0
+    created: "2022-08-09T15:49:36.798010236Z"
+    description: A Helm chart for Kubernetes
+    digest: d805f9e133c105cd51de2ca8401163ddd545a97071b4f7533504713af0ab5a3d
+    name: fozzy
+    type: application
+    urls:
+    - fozzy-0.1.1.tgz
+    version: 0.1.1
+  stately:
+  - apiVersion: v2
+    appVersion: 1.16.0
+    created: "2022-08-09T15:49:36.798687769Z"
+    description: A Helm chart for Kubernetes
+    digest: 36e28daf939d85978348a1417e8a4605ca183559ec347a73730de727ff9c2d4f
+    name: stately
+    type: application
+    urls:
+    - stately-0.1.7.tgz
+    version: 0.1.7
+generated: "2022-08-09T15:49:36.797271434Z"
