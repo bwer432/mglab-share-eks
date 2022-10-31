@@ -1,0 +1,61 @@
+{
+
+    "CallerReference": "kops-oidc-dist",
+    "Comment": "kOps OIDC store distribution",
+    "Enabled": true,
+    "Origins": {
+        "Quantity": 1,
+        "Items": [
+            {
+                "Id": "unique1-k8s-local-oidc-store.s3.amazonaws.com-kops-oidc-dist",
+                "DomainName": "unique1-k8s-local-oidc-store.s3.amazonaws.com",
+                "S3OriginConfig": {
+                    "OriginAccessIdentity": "origin-access-identity/cloudfront/E2NNIOBNM5EKLV"
+                }
+            }
+        ]
+    },
+    "DefaultCacheBehavior": {
+        "TargetOriginId": "unique1-k8s-local-oidc-store.s3.amazonaws.com-kops-oidc-dist",
+        "ForwardedValues": {
+            "QueryString": false,
+            "Cookies": {
+                "Forward": "none"
+            },
+            "Headers": {
+                "Quantity": 0
+            },
+            "QueryStringCacheKeys": {
+                "Quantity": 0
+            }
+        },
+        "TrustedSigners": {
+            "Enabled": false,
+            "Quantity": 0
+        },
+        "ViewerProtocolPolicy": "allow-all",
+        "MinTTL": 0,
+        "AllowedMethods": {
+            "Quantity": 2,
+            "Items": [
+                "HEAD",
+                "GET"
+            ],
+            "CachedMethods": {
+                "Quantity": 2,
+                "Items": [
+                    "HEAD",
+                    "GET"
+                ]
+            }
+        },
+        "SmoothStreaming": false,
+        "DefaultTTL": 86400,
+        "MaxTTL": 31536000,
+        "Compress": false,
+        "LambdaFunctionAssociations": {
+            "Quantity": 0
+        },
+        "FieldLevelEncryptionId": ""
+    }
+}

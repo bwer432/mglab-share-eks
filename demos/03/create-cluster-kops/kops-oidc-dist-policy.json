@@ -1,0 +1,17 @@
+{
+    "Version": "2012-10-17",
+    "Id": "PolicyForCloudFrontPrivateContent",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity E2NNIOBNM5EKLV"
+            },
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+            ],
+            "Resource": "arn:aws:s3:::unique1-k8s-local-oidc-store/*"
+        }
+    ]
+}
