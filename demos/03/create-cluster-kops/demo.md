@@ -36,13 +36,14 @@
 #### 0: Reset Cloud9 Instance environ from previous demo(s).
 - Reset your region & AWS account variables in case you launched a new terminal session:
 ```
-cd ~/environment/mglab-share-eks/demos/03/create-cluster-terraform/
+cd ~/environment/mglab-share-eks/demos/03/create-cluster-kops/
 export C9_REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document |  grep region | awk -F '"' '{print$4}')
 export C9_AWS_ACCT=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep accountId | awk -F '"' '{print$4}')
 clear
 echo $C9_REGION
 echo $C9_AWS_ACCT
 export KOPS_REGION=$C9_REGION  # change this if desired
+export KOPS_ACCOUNT=$C9_AWS_ACCT  # change this if desired
 ```
 
 #### 1: Install the kOps CLI onto the Cloud9 IDE instance.
@@ -89,17 +90,21 @@ aws iam add-user-to-group --user-name kops --group-name kops
 ```
 - Create an access key for this user.
 ```
-aws iam create-access-key --user-name kops
+kopsAccessKey=$(aws iam create-access-key --user-name kops)
 ```
 
 #### 5: Assign "kops" user access key into Cloud9 session
 - Configure the new "kops" user access key into your environment.
 ```
+# aws configure           # Use your new access and secret key here, or assign AWS_PROFILE accordingly
+aws configure set aws_access_key_id $(echo $kopsAccessKey | jq .AccessKey.AccessKeyId) --profile kops
+aws configure set aws_secret_access_key $(echo $kopsAccessKey | jq .AccessKey.SecretAccessKey) --profile kops
+aws configure set region $KOPS_REGION --profile kops
+# LATER, use: export AWS_PROFILE=kops
 # configure the aws client to use your new IAM user
-aws configure           # Use your new access and secret key here, or assign AWS_PROFILE accordingly
 # Because "aws configure" doesn't export these vars for kops to use, we export them now
-export AWS_ACCESS_KEY_ID=$(aws configure get aws_access_key_id)
-export AWS_SECRET_ACCESS_KEY=$(aws configure get aws_secret_access_key)
+export AWS_ACCESS_KEY_ID=$(aws configure get aws_access_key_id --profile kops)
+export AWS_SECRET_ACCESS_KEY=$(aws configure get aws_secret_access_key --profile kops)
 ```
 #### 6: Assign the cluster's DNS suffix
 - Configure a DNS suffix for the cluster, using Gossip DNS rather than Route 53.
@@ -110,8 +115,18 @@ KOPS_SUFFIX=".k8s.local"
 KOPS_DNSNAME=${KOPS_PREFIX}${KOPS_SUFFIX}
 KOPS_NAME=$(echo ${KOPS_PREFIX}${KOPS_SUFFIX} | sed 's/\./-/g')
 ```
-
-#### 7: Create two Amazon S3 buckets for storing your Kubernetes cluster state and identity trust configuration
+#### 7: Switch to an AWS account which can create public S3 buckets.
+- Assume a role in another AWS account.
+```
+rolearn="arn:aws:iam::639366692623:role/ExtAccountRole"
+rolesession="kopsbucket"
+role=$(aws sts assume-role --role-arn "$rolearn" --role-session-name "$rolesession")
+echo "export AWS_ACCESS_KEY_ID=$(echo $role | jq -r '.Credentials.AccessKeyId')"
+echo "export AWS_SECRET_ACCESS_KEY=$(echo $role | jq -r '.Credentials.SecretAccessKey')"
+echo "export AWS_SESSION_TOKEN=$(echo $role | jq -r '.Credentials.SessionToken')"
+aws sts get-caller-identity
+```
+#### 8: Create two Amazon S3 buckets for storing your Kubernetes cluster state and identity trust configuration
 - Create an S3 bucket for your cluster state.
 ```
 aws s3api create-bucket \
@@ -127,14 +142,51 @@ aws s3api put-bucket-versioning --bucket ${KOPS_NAME}-state-store  --versioning-
 ```
 aws s3api put-bucket-encryption --bucket ${KOPS_NAME}-state-store --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
 ```
+- Define permissions for cross-account access to state bucket.
+```
+cat <<EOF >kops-state-store-policy.json
+{
+    "Version": "2012-10-17",
+    "Id": "PolicyForCrossAccountAccess",
+    "Statement": [
+        {
+           "Sid": "Cross-account-permissions",
+           "Effect": "Allow",
+           "Principal": {
+              "AWS": [
+                  "arn:aws:iam::${KOPS_ACCOUNT}:root",
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/kops",
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/brad",
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/bwer"
+               ]
+           },
+           "Action": [
+              "s3:*"
+           ],
+           "Resource": [
+              "arn:aws:s3:::${KOPS_NAME}-state-store/*",
+              "arn:aws:s3:::${KOPS_NAME}-state-store"
+           ]
+        }
+    ]
+}
+EOF
+```
+- Assign permissions to OIDC store bucket.
+```
+aws s3api put-bucket-policy --bucket ${KOPS_NAME}-state-store --policy file://kops-state-store-policy.json
+```
 - Create an S3 bucket for your OIDC identity trust information.
 ```
 aws s3api create-bucket \
     --bucket ${KOPS_NAME}-oidc-store \
     --region $KOPS_REGION \
-    --create-bucket-configuration LocationConstraint=$KOPS_REGION
+    --create-bucket-configuration LocationConstraint=$KOPS_REGION \
+    --acl public-read
 ```
-- NOTE: cannot do public read - what permissions do we really need for STS here? --acl public-read was suggested in demo.
+- NOTE: some accounts cannot do public read 
+- what permissions do we really need for STS here? 
+- --acl public-read was suggested in demo.
 - Therefore:
 - Create Amazon CloudFront distribution in front of S3 bucket.
 ```
@@ -228,6 +280,25 @@ cat <<EOF >kops-oidc-dist-policy.json
                 "s3:PutObject"
             ],
             "Resource": "arn:aws:s3:::${KOPS_NAME}-oidc-store/*"
+        },
+        {
+           "Sid": "Cross-account-permissions",
+           "Effect": "Allow",
+           "Principal": {
+              "AWS": [
+                  "arn:aws:iam::${KOPS_ACCOUNT}:root",
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/kops",
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/brad",
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/bwer"
+               ]
+           },
+           "Action": [
+              "s3:*"
+           ],
+           "Resource": [
+              "arn:aws:s3:::${KOPS_NAME}-oidc-store",
+              "arn:aws:s3:::${KOPS_NAME}-oidc-store/*"
+           ]
         }
     ]
 }
@@ -250,19 +321,44 @@ export KOPS_STATE_STORE=s3://${KOPS_NAME}-state-store
 export KOPS_OIDC_STORE=s3://${KOPS_NAME}-oidc-store
 export KOPS_OIDC_DIST=https://${OIDC_DOMAIN}
 ```
-
-#### 8: Create a Kubernetes cluster using `kops create cluster`
+#### 9: Switch back to original KOPS account.
+- Switch from S3 account back to KOPS account.
+```
+echo "unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN"
+```
+- Confirm cross-account access to state and oidc stores.
+```
+aws s3 ls $KOPS_STATE_STORE
+aws s3 ls $KOPS_OIDC_STORE
+```
+#### 10: Create a Kubernetes cluster using `kops create cluster`
 - Select availability zones to use for the Kubernetes cluster.
 ```
 KOPS_ZONES=$(aws ec2 describe-availability-zones --region $KOPS_REGION --query AvailabilityZones[].ZoneName --output text | tr '\t' ',')
 ```
+- Set flexible cross-account S3 bucket default ACLs.
+- The kops quickstart guide suggests this:
+  - kOps will be able to use buckets configured with cross-account policies by default.
+  - In this case you may want to override the object ACLs which kOps places on the state files, as default AWS ACLs will make it possible for an account that has delegated access to write files that the bucket owner cannot read.
+  - To do this you should set the environment variable KOPS_STATE_S3_ACL to the preferred object ACL, for example: bucket-owner-full-control.
+```
+export KOPS_STATE_S3_ACL=bucket-owner-full-control
+```
 - Create your Kubernetes cluster configuration using `kops create cluster`.
+- Be sure to use either KOPS_OIDC_STORE for S3 when allowed,
+- or KOPS_OIDC_DIST if using CloudFront is possible.
 ```
 kops create cluster \
     --name=${KOPS_DNSNAME} \
     --cloud=aws \
     --zones=${KOPS_ZONES} \
-    --discovery-store=${KOPS_OIDC_DIST}/${KOPS_DNSNAME}/discovery
+    --discovery-store=${KOPS_OIDC_STORE}/${KOPS_DNSNAME}/discovery \
+    >./kops-cluster-info-$(date +%Y%m%d%H%M%S).txt
+```
+- Look at YAML representation of cluster configuration.
+```
+kops get cluster --name $KOPS_DNSNAME -o yaml \
+    >./kops-cluster-$(date +%Y%m%d%H%M%S).yaml
 ```
 - Customize cluster configuration.
 ```
@@ -272,58 +368,20 @@ kops edit cluster --name ${KOPS_DNSNAME}
 ```
 kops update cluster --name ${KOPS_DNSNAME} --yes
 ```
-
-
-OLD...
-
-#### 4: Generate a kubeconfig & Access the EKS Cluster with kubectl.
-- Install kubectl & review your kubeconfig:
+#### 11: Test cluster access
+- Use admin mode for authentication.
 ```
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-curl -LO "https://dl.k8s.io/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
-echo "$(<kubectl.sha256) kubectl" | sha256sum --check
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+kops export kubecfg --admin
 ```
-- Confirm your current IAM user configured for use with the CLI:
+- Show the condensed version of the ~/.kube/config
 ```
-export AWS_ACCESS_KEY_ID=$(cat ~/.aws/credentials | grep aws_access_key_id | awk '{print$3}')
-export AWS_SECRET_ACCESS_KEY=$(cat ~/.aws/credentials | grep aws_secret_access_key | awk '{print$3}')
-aws sts get-caller-identity
-```
-- Use aws cli to manually create/update a kubeconfig context to the cluster:
-```
-aws eks update-kubeconfig --name cluster-terraform --region $C9_REGION
-kubectl config use-context arn:aws:eks:$C9_REGION:$C9_AWS_ACCT:cluster/cluster-terraform
 kubectl config view --minify
 ```
 - Confirm you now have access to run kubectl commands as well as eksctl commands:
 ```
-kubectl get all -A
 kubectl get nodes
-```
-
-#### 7: Test the Cluster Autoscaler.
-
-- Confirm the Cluster Autoscaler is functional, use _ctrl-c_ to exit:
-```
-kubectl logs deployment.app/cluster-autoscaler-aws-cluster-autoscaler -f -n kube-system
-```
-
-
-#### 8: Deploy Wordpress app front end on Fargate & Mysql backend on managed Nodegroup.
-- Deploy Wordpress front & back end workloads:
-```
-cat ../k8s/k8s-all-in-one-fargate.yaml  | sed "s/<REGION>/$C9_REGION/" | kubectl apply -f -
-watch kubectl get pods -o wide -n wordpress-fargate
-```
-- Get all K8s nodes, you should see some additional `fargate` nodes:
-```
-kubectl get nodes -o wide
-```
-- Get the URL for our new app and test access in your browser:
-```
-echo "http://"$(kubectl get svc wordpress -n wordpress-fargate \
---output jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+kubectl get all -A
+kops validate cluster --wait 10m
 ```
 
 ---------------------------------------------------------------
@@ -342,12 +400,6 @@ echo "http://"$(kubectl get svc wordpress -n wordpress-fargate \
 ### CLEANUP
 - Do not cleanup if you plan to run any dependent demos
 ```
-export C9_REGION=$(curl --silent http://169.254.169.254/latest/dynamic/instance-identity/document |  grep region | awk -F '"' '{print$4}')
-export C9_AWS_ACCT=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | grep accountId | awk -F '"' '{print$4}')
-export AWS_ACCESS_KEY_ID=$(cat ~/.aws/credentials | grep aws_access_key_id | awk '{print$3}')
-export AWS_SECRET_ACCESS_KEY=$(cat ~/.aws/credentials | grep aws_secret_access_key | awk '{print$3}')
-kubectl config use-context arn:aws:eks:$C9_REGION:$C9_AWS_ACCT:cluster/cluster-terraform
-kubectl delete namespace wordpress-fargate --force
-cd ~/environment/mglab-share-eks/demos/03/create-cluster-terraform/artifacts/terraform
-terraform destroy -auto-approve
+cd ~/environment/mglab-share-eks/demos/03/create-cluster-kops/
+kops delete cluster --name $KOPS_DNSNAME --yes
 ```
