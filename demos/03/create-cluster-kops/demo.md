@@ -133,8 +133,13 @@ then
   echo "export AWS_ACCESS_KEY_ID=$(echo $role | jq -r '.Credentials.AccessKeyId')"
   echo "export AWS_SECRET_ACCESS_KEY=$(echo $role | jq -r '.Credentials.SecretAccessKey')"
   echo "export AWS_SESSION_TOKEN=$(echo $role | jq -r '.Credentials.SessionToken')"
-  aws sts get-caller-identity
 fi
+```
+- If using a second account:
+- Copy and paste those three export lines to execute them.
+- Then confirm the assumed identity.
+```
+aws sts get-caller-identity
 ```
 #### 8: Create two Amazon S3 buckets for storing your Kubernetes cluster state and identity trust configuration
 - Create an S3 bucket for your cluster state.
@@ -165,9 +170,7 @@ cat <<EOF >kops-state-store-policy.json
            "Principal": {
               "AWS": [
                   "arn:aws:iam::${KOPS_ACCOUNT}:root",
-                  "arn:aws:iam::${KOPS_ACCOUNT}:user/kops",
-                  "arn:aws:iam::${KOPS_ACCOUNT}:user/brad",
-                  "arn:aws:iam::${KOPS_ACCOUNT}:user/bwer"
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/kops"
                ]
            },
            "Action": [
@@ -297,9 +300,7 @@ cat <<EOF >kops-oidc-dist-policy.json
            "Principal": {
               "AWS": [
                   "arn:aws:iam::${KOPS_ACCOUNT}:root",
-                  "arn:aws:iam::${KOPS_ACCOUNT}:user/kops",
-                  "arn:aws:iam::${KOPS_ACCOUNT}:user/brad",
-                  "arn:aws:iam::${KOPS_ACCOUNT}:user/bwer"
+                  "arn:aws:iam::${KOPS_ACCOUNT}:user/kops"
                ]
            },
            "Action": [
