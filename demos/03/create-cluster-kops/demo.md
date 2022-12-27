@@ -44,7 +44,14 @@ echo $C9_REGION
 echo $C9_AWS_ACCT
 export KOPS_REGION=$C9_REGION  # change this if desired
 export KOPS_ACCOUNT=$C9_AWS_ACCT  # change this if desired
+export KOPS_STATE_ACCOUNT=$KOPS_ACCOUNT # change this to use alternative account for State+OIDC stores.
+export KOPS_STATE_ROLE="" # change this to use alternative account for State+OIDC stores.
 ```
+- To use cross-account buckets for the state store and OIDC store, define appropriate values for the that account and role.
+- as noted above: "change this to use alternative account for State+OIDC stores."
+- e.g. 
+  - export KOPS_STATE_ACCOUNT="639366692623" 
+  - export KOPS_STATE_ROLE="ExtAccountRole" 
 
 #### 1: Install the kOps CLI onto the Cloud9 IDE instance.
 - Install the 'kops' CLI onto Cloud9
@@ -118,13 +125,16 @@ KOPS_NAME=$(echo ${KOPS_PREFIX}${KOPS_SUFFIX} | sed 's/\./-/g')
 #### 7: Switch to an AWS account which can create public S3 buckets.
 - Assume a role in another AWS account.
 ```
-rolearn="arn:aws:iam::639366692623:role/ExtAccountRole"
-rolesession="kopsbucket"
-role=$(aws sts assume-role --role-arn "$rolearn" --role-session-name "$rolesession")
-echo "export AWS_ACCESS_KEY_ID=$(echo $role | jq -r '.Credentials.AccessKeyId')"
-echo "export AWS_SECRET_ACCESS_KEY=$(echo $role | jq -r '.Credentials.SecretAccessKey')"
-echo "export AWS_SESSION_TOKEN=$(echo $role | jq -r '.Credentials.SessionToken')"
-aws sts get-caller-identity
+if [ "$KOPS_STATE_ROLE" ]
+then
+  rolearn="arn:aws:iam::${KOPS_STATE_ACCOUNT}:role/${KOPS_STATE_ROLE}"
+  rolesession="kopsbucket"
+  role=$(aws sts assume-role --role-arn "$rolearn" --role-session-name "$rolesession")
+  echo "export AWS_ACCESS_KEY_ID=$(echo $role | jq -r '.Credentials.AccessKeyId')"
+  echo "export AWS_SECRET_ACCESS_KEY=$(echo $role | jq -r '.Credentials.SecretAccessKey')"
+  echo "export AWS_SESSION_TOKEN=$(echo $role | jq -r '.Credentials.SessionToken')"
+  aws sts get-caller-identity
+fi
 ```
 #### 8: Create two Amazon S3 buckets for storing your Kubernetes cluster state and identity trust configuration
 - Create an S3 bucket for your cluster state.
