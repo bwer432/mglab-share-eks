@@ -197,103 +197,13 @@ aws s3api create-bucket \
     --create-bucket-configuration LocationConstraint=$KOPS_REGION \
     --acl public-read
 ```
-- NOTE: some accounts cannot do public read 
-- what permissions do we really need for STS here? 
-- --acl public-read was suggested in demo.
-- Therefore:
-- Create Amazon CloudFront distribution in front of S3 bucket.
-```
-OAI=$(aws cloudfront create-cloud-front-origin-access-identity \
-    --cloud-front-origin-access-identity-config \
-        CallerReference="kops-oidc-store-oai",Comment="kOps OIDC store OAI" \
-    --query CloudFrontOriginAccessIdentity.Id \
-    --output text)
-cat <<EOF >kops-oidc-dist-config.json
-{
-
-    "CallerReference": "kops-oidc-dist",
-    "Comment": "kOps OIDC store distribution",
-    "Enabled": true,
-    "Origins": {
-        "Quantity": 1,
-        "Items": [
-            {
-                "Id": "${KOPS_NAME}-oidc-store.s3.amazonaws.com-kops-oidc-dist",
-                "DomainName": "${KOPS_NAME}-oidc-store.s3.amazonaws.com",
-                "S3OriginConfig": {
-                    "OriginAccessIdentity": "origin-access-identity/cloudfront/${OAI}"
-                }
-            }
-        ]
-    },
-    "DefaultCacheBehavior": {
-        "TargetOriginId": "${KOPS_NAME}-oidc-store.s3.amazonaws.com-kops-oidc-dist",
-        "ForwardedValues": {
-            "QueryString": false,
-            "Cookies": {
-                "Forward": "none"
-            },
-            "Headers": {
-                "Quantity": 0
-            },
-            "QueryStringCacheKeys": {
-                "Quantity": 0
-            }
-        },
-        "TrustedSigners": {
-            "Enabled": false,
-            "Quantity": 0
-        },
-        "ViewerProtocolPolicy": "allow-all",
-        "MinTTL": 0,
-        "AllowedMethods": {
-            "Quantity": 2,
-            "Items": [
-                "HEAD",
-                "GET"
-            ],
-            "CachedMethods": {
-                "Quantity": 2,
-                "Items": [
-                    "HEAD",
-                    "GET"
-                ]
-            }
-        },
-        "SmoothStreaming": false,
-        "DefaultTTL": 86400,
-        "MaxTTL": 31536000,
-        "Compress": false,
-        "LambdaFunctionAssociations": {
-            "Quantity": 0
-        },
-        "FieldLevelEncryptionId": ""
-    }
-}
-EOF
-OIDC_DIST=$(aws cloudfront create-distribution \
-    --distribution-config file://kops-oidc-dist-config.json \
-    --query Distribution.Id \
-    --output text)
-```
-- Define permissions for CloudFront distribution identity (OAI) to access bucket.
+- Define permissions for kops account to access bucket.
 ```
 cat <<EOF >kops-oidc-dist-policy.json
 {
     "Version": "2012-10-17",
     "Id": "PolicyForCloudFrontPrivateContent",
     "Statement": [
-        {
-            "Effect": "Allow",
-            "Principal": {
-                "AWS": "arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ${OAI}"
-            },
-            "Action": [
-                "s3:GetObject",
-                "s3:PutObject"
-            ],
-            "Resource": "arn:aws:s3:::${KOPS_NAME}-oidc-store/*"
-        },
         {
            "Sid": "Cross-account-permissions",
            "Effect": "Allow",
@@ -319,18 +229,10 @@ EOF
 ```
 aws s3api put-bucket-policy --bucket ${KOPS_NAME}-oidc-store --policy file://kops-oidc-dist-policy.json
 ```
-- Get domain name of OIDC distribution.
-```
-OIDC_DOMAIN=$(aws cloudfront get-distribution \
-    --id $OIDC_DIST \
-    --query Distribution.DomainName \
-    --output text)
-```
 - Assign variables to be used to refer to state and oidc stores.
 ```
 export KOPS_STATE_STORE=s3://${KOPS_NAME}-state-store
 export KOPS_OIDC_STORE=s3://${KOPS_NAME}-oidc-store
-export KOPS_OIDC_DIST=https://${OIDC_DOMAIN}
 ```
 #### 9: Switch back to original KOPS account.
 - Switch from S3 account back to KOPS account.
@@ -357,7 +259,6 @@ export KOPS_STATE_S3_ACL=bucket-owner-full-control
 ```
 - Create your Kubernetes cluster configuration using `kops create cluster`.
 - Be sure to use either KOPS_OIDC_STORE for S3 when allowed,
-- or KOPS_OIDC_DIST if using CloudFront is possible.
 ```
 kops create cluster \
     --name=${KOPS_DNSNAME} \
